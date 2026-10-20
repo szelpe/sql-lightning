@@ -13,6 +13,9 @@ const dataReady = Promise.all([fetchText('data/seed.sql'), fetchText('data/shado
 const schemaCache = {}; // 'main' or a lesson id (for lessons with setupSql) -> table info
 let lesson = null; // currently shown lesson
 let runSeq = 0; // ignores results from runs that a newer run superseded
+// The query that just solved a task. Until the learner edits it, re-running it shows that
+// success instead of checking the same query against the next task.
+let justSolved = null; // { sql, taskIndex, tests }
 let liveTimer = null;
 
 const editor = CodeMirror($('editor'), {
@@ -45,6 +48,7 @@ $('show-solution').addEventListener('click', () => {
 $('reset-progress').addEventListener('click', () => {
   if (!confirm(`Clear your progress for "${lesson.title}"?`)) return;
   progress.resetLesson(lesson.id);
+  justSolved = null;
   renderNav();
   renderTasks();
   renderTests(currentTask(), null);
@@ -79,6 +83,7 @@ function route() {
 
 function showLesson(next) {
   lesson = next;
+  justSolved = null;
   const chapter = chapterOf(lesson);
   document.title = `${lesson.title} · SQL Lightning`;
   $('lesson-kicker').textContent =
@@ -276,9 +281,13 @@ async function runQuery({ live }) {
     return;
   }
 
-  const taskIndex = activeTaskIndex();
+  const showingSolved = justSolved?.sql === sql;
+  if (!showingSolved) justSolved = null;
+  const taskIndex = showingSolved ? -1 : activeTaskIndex();
   const task = taskIndex === -1 ? null : lesson.tasks[taskIndex];
-  const runs = buildRuns(sql, task);
+  // Tasks can bring their own setup; without a task to check, use the one just finished.
+  const context = task ?? lesson.tasks[justSolved?.taskIndex ?? lesson.tasks.length - 1];
+  const runs = buildRuns(sql, task, context);
 
   let results;
   try {
@@ -302,6 +311,10 @@ async function runQuery({ live }) {
   if (!user.columns.length && task?.afterQuery) showResult(user.after[0], 'after your statements');
   else showResult(user);
 
+  if (showingSolved) {
+    showSolved();
+    return;
+  }
   if (!task) {
     setFeedback('', '');
     return;
@@ -310,12 +323,19 @@ async function runQuery({ live }) {
   renderTests(task, verdict.tests);
   if (verdict.ok) {
     progress.markSolved(lesson.id, taskIndex, sql);
+    justSolved = { sql, taskIndex, tests: verdict.tests };
     renderTasks();
     renderNav();
     const next = currentTask();
-    if (next?.starterSql) loadQuery(next.starterSql, { run: false });
-    if (next) renderTests(next, null);
-    setFeedback(next ? `✓ Task ${taskIndex + 1} solved. On to the next one!` : '✓ All tasks solved.', 'ok');
+    if (next?.starterSql) {
+      // The next task starts from new SQL, so there is nothing to keep showing.
+      loadQuery(next.starterSql, { run: false });
+      justSolved = null;
+      renderTests(next, null);
+      setFeedback(`✓ Task ${taskIndex + 1} solved. Task ${taskIndex + 2} starts from a fresh query.`, 'ok');
+      return;
+    }
+    showSolved();
   } else if (live) {
     setFeedback('', '');
   } else {
@@ -325,8 +345,8 @@ async function runQuery({ live }) {
 
 // Which statements to run for one check: the learner's SQL, plus whatever the task's
 // kind of check needs (see checker.js). Every run starts from a fresh copy of the data.
-function buildRuns(sql, task) {
-  const base = { dataset: 'main', foreignKeys: lesson.foreignKeys, setup: task?.setupSql ?? lesson.setupSql };
+function buildRuns(sql, task, context) {
+  const base = { dataset: 'main', foreignKeys: lesson.foreignKeys, setup: context?.setupSql ?? lesson.setupSql };
   const runs = { user: { ...base, sql } };
   if (!task) return runs;
 
@@ -342,11 +362,21 @@ function buildRuns(sql, task) {
   return runs;
 }
 
+function showSolved() {
+  const { taskIndex, tests } = justSolved;
+  renderTests(lesson.tasks[taskIndex], tests);
+  const hasNext = activeTaskIndex() !== -1;
+  setFeedback(hasNext
+    ? `✓ Task ${taskIndex + 1} solved. Change your query to start task ${taskIndex + 2}.`
+    : '✓ All tasks solved.', 'ok');
+}
+
 // Lists a task's test statements with their outcome; `outcomes` is null when they didn't run.
 function renderTests(task, outcomes) {
   const box = $('tests');
   box.hidden = !task?.tests;
   if (!task?.tests) return;
+  $('tests-title').textContent = `Checks for task ${lesson.tasks.indexOf(task) + 1}`;
   $('test-list').replaceChildren(...task.tests.map((test, i) => {
     const outcome = outcomes?.[i];
     const state = outcome ? (outcome.passed ? 'pass' : 'fail') : 'pending';
