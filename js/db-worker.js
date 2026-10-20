@@ -19,22 +19,38 @@ self.onmessage = async ({ data }) => {
       }
       self.postMessage({ id: data.id, result: true });
     } else if (data.type === 'run') {
-      self.postMessage({ id: data.id, result: data.queries.map((q) => run(q.sql, q.dataset)) });
+      self.postMessage({ id: data.id, result: data.queries.map(run) });
     }
   } catch (e) {
     self.postMessage({ id: data.id, error: e.message });
   }
 };
 
-function run(sql, dataset) {
+// q: { sql, dataset, foreignKeys?, setup?, after?: [sql] }
+// `setup` runs before `sql`; each `after` statement runs on the same database afterwards,
+// and its own result (or error) is returned in `after`.
+function run({ sql, dataset, foreignKeys, setup, after }) {
   const db = new SQL.Database(images[dataset]);
+  try {
+    if (foreignKeys) db.exec('PRAGMA foreign_keys = ON;');
+    if (setup) {
+      const res = exec(db, setup);
+      if (res.error) return { error: `Lesson setup failed: ${res.error}` };
+    }
+    const main = exec(db, sql);
+    if (!main.error && after) main.after = after.map((s) => exec(db, s));
+    return main;
+  } finally {
+    db.close();
+  }
+}
+
+function exec(db, sql) {
   try {
     const sets = db.exec(sql);
     const last = sets[sets.length - 1];
     return last ? { columns: last.columns, values: last.values } : { columns: [], values: [] };
   } catch (e) {
     return { error: e.message };
-  } finally {
-    db.close();
   }
 }

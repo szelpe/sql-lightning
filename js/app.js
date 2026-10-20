@@ -10,7 +10,7 @@ const runner = new SqlRunner();
 const dataReady = Promise.all([fetchText('data/seed.sql'), fetchText('data/shadow.sql')])
   .then(([seed, shadow]) => runner.load({ main: seed, shadow: `${seed}\n${shadow}` }));
 
-let schemaCache = null;
+const schemaCache = {}; // 'main' or a lesson id (for lessons with setupSql) -> table info
 let lesson = null; // currently shown lesson
 let runSeq = 0; // ignores results from runs that a newer run superseded
 let liveTimer = null;
@@ -31,7 +31,7 @@ editor.on('change', (_cm, change) => {
 });
 
 $('run-query').addEventListener('click', () => runQuery({ live: false }));
-$('reset-query').addEventListener('click', () => loadQuery(lesson.starterSql));
+$('reset-query').addEventListener('click', () => loadQuery(starterSql()));
 $('show-hint').addEventListener('click', () => {
   const task = currentTask();
   if (!task) return;
@@ -47,7 +47,8 @@ $('reset-progress').addEventListener('click', () => {
   progress.resetLesson(lesson.id);
   renderNav();
   renderTasks();
-  loadQuery(lesson.starterSql);
+  renderTests(currentTask(), null);
+  loadQuery(starterSql());
 });
 $('nav-toggle').addEventListener('click', () => {
   const open = $('sidebar').classList.toggle('open');
@@ -88,7 +89,8 @@ function showLesson(next) {
   renderNav();
   renderTasks();
   renderSchema();
-  loadQuery(lesson.starterSql);
+  renderTests(currentTask(), null);
+  loadQuery(starterSql());
   window.scrollTo(0, 0);
 }
 
@@ -99,7 +101,7 @@ function renderNav() {
     head.append(el('span', 'chapter-title', `Chapter ${chapterNumber(chapter)} · ${chapter.title}`));
     const playable = chapter.lessons.filter(isPlayable);
     if (!playable.length) {
-      li.classList.add('soon');
+      li.classList.add('upcoming');
       head.append(el('span', 'badge', 'soon'));
     } else {
       const done = playable.filter(isComplete).length;
@@ -178,9 +180,13 @@ function renderLessonDone() {
 
 async function renderSchema() {
   const box = $('schema');
-  if (!schemaCache) schemaCache = await loadSchema();
+  const shown = lesson;
+  box.closest('.schema').hidden = !lesson.tables.length;
+  const key = lesson.setupSql ? lesson.id : 'main';
+  schemaCache[key] ||= await loadSchema(lesson.setupSql);
+  if (lesson !== shown) return;
   box.replaceChildren(...lesson.tables.map((name) => {
-    const info = schemaCache[name] || { columns: [], rows: 0 };
+    const info = schemaCache[key][name] || { columns: [], rows: 0 };
     const card = el('div', 'schema-table');
 
     const head = el('div', 'schema-head');
@@ -208,10 +214,12 @@ async function renderSchema() {
   }));
 }
 
-async function loadSchema() {
+// Columns, keys and row counts of every table, after an optional lesson setup script.
+async function loadSchema(setup) {
   await dataReady;
   const [cols] = await runner.run([{
     dataset: 'main',
+    setup,
     sql: `SELECT m.name, p.name, p.type, p.pk, f."table"
           FROM sqlite_master m
           JOIN pragma_table_info(m.name) p
@@ -226,6 +234,7 @@ async function loadSchema() {
   if (tables.length) {
     const [counts] = await runner.run([{
       dataset: 'main',
+      setup,
       sql: tables.map((t) => `SELECT '${t}', COUNT(*) FROM "${t}"`).join(' UNION ALL '),
     }]);
     for (const [table, n] of counts.values || []) schema[table].rows = n;
@@ -243,6 +252,11 @@ function activeTaskIndex() {
 function currentTask() {
   const i = activeTaskIndex();
   return i === -1 ? null : lesson.tasks[i];
+}
+
+// A task may bring its own starting point (e.g. a fresh table), otherwise the lesson's.
+function starterSql() {
+  return currentTask()?.starterSql ?? lesson.starterSql;
 }
 
 function loadQuery(sql, { run = true } = {}) {
@@ -264,44 +278,44 @@ async function runQuery({ live }) {
 
   const taskIndex = activeTaskIndex();
   const task = taskIndex === -1 ? null : lesson.tasks[taskIndex];
-  const queries = [{ sql, dataset: 'main' }];
-  if (task) {
-    queries.push(
-      { sql: task.solution, dataset: 'main' },
-      { sql, dataset: 'shadow' },
-      { sql: task.solution, dataset: 'shadow' },
-    );
-  }
+  const runs = buildRuns(sql, task);
 
   let results;
   try {
     await dataReady;
-    results = await runner.run(queries);
+    const keys = Object.keys(runs);
+    const out = await runner.run(keys.map((k) => runs[k]));
+    results = Object.fromEntries(keys.map((k, i) => [k, out[i]]));
   } catch (e) {
     if (seq === runSeq) setFeedback(e.message, 'err');
     return;
   }
   if (seq !== runSeq) return;
 
-  const [user] = results;
+  const { user } = results;
   if (user.error) {
     // While typing, half-finished queries are expected; keep the last table and stay quiet.
     setFeedback(user.error, live ? 'soft' : 'err');
+    renderTests(task, null);
     return;
   }
-  showResult(user);
+  if (!user.columns.length && task?.afterQuery) showResult(user.after[0], 'after your statements');
+  else showResult(user);
 
   if (!task) {
     setFeedback('', '');
     return;
   }
   const verdict = checkTask(task, sql, results);
+  renderTests(task, verdict.tests);
   if (verdict.ok) {
     progress.markSolved(lesson.id, taskIndex, sql);
     renderTasks();
     renderNav();
-    const remaining = activeTaskIndex() !== -1;
-    setFeedback(remaining ? `✓ Task ${taskIndex + 1} solved. On to the next one!` : '✓ All tasks solved.', 'ok');
+    const next = currentTask();
+    if (next?.starterSql) loadQuery(next.starterSql, { run: false });
+    if (next) renderTests(next, null);
+    setFeedback(next ? `✓ Task ${taskIndex + 1} solved. On to the next one!` : '✓ All tasks solved.', 'ok');
   } else if (live) {
     setFeedback('', '');
   } else {
@@ -309,7 +323,44 @@ async function runQuery({ live }) {
   }
 }
 
-function showResult(result) {
+// Which statements to run for one check: the learner's SQL, plus whatever the task's
+// kind of check needs (see checker.js). Every run starts from a fresh copy of the data.
+function buildRuns(sql, task) {
+  const base = { dataset: 'main', foreignKeys: lesson.foreignKeys, setup: task?.setupSql ?? lesson.setupSql };
+  const runs = { user: { ...base, sql } };
+  if (!task) return runs;
+
+  const afterQuery = task.afterQuery ? [task.afterQuery] : [];
+  runs.user.after = [...afterQuery, ...(task.tests || []).map((t) => t.sql)];
+  if (task.afterQuery) {
+    runs.ref = { ...base, sql: task.solution, after: afterQuery };
+  } else if (!task.tests) {
+    runs.ref = { ...base, sql: task.solution };
+    runs.userShadow = { ...base, sql, dataset: 'shadow' };
+    runs.refShadow = { ...base, sql: task.solution, dataset: 'shadow' };
+  }
+  return runs;
+}
+
+// Lists a task's test statements with their outcome; `outcomes` is null when they didn't run.
+function renderTests(task, outcomes) {
+  const box = $('tests');
+  box.hidden = !task?.tests;
+  if (!task?.tests) return;
+  $('test-list').replaceChildren(...task.tests.map((test, i) => {
+    const outcome = outcomes?.[i];
+    const state = outcome ? (outcome.passed ? 'pass' : 'fail') : 'pending';
+    const li = el('li', state);
+    li.append(
+      el('span', 'test-mark', { pass: '✓', fail: '✗', pending: '·' }[state]),
+      el('span', 'test-label', test.label),
+      el('span', 'test-expect', test.expect && test.expect !== 'ok' ? `rejected (${test.expect})` : 'works'),
+    );
+    return li;
+  }));
+}
+
+function showResult(result, note = '') {
   const wrap = $('results');
   if (!result) {
     wrap.replaceChildren();
@@ -317,7 +368,7 @@ function showResult(result) {
     return;
   }
   if (!result.columns.length) {
-    wrap.replaceChildren(el('p', 'muted', 'The statement ran, but returned no result set.'));
+    wrap.replaceChildren(el('p', 'muted', 'The statements ran successfully. They returned no rows to show.'));
     $('result-meta').textContent = '';
     return;
   }
@@ -334,7 +385,7 @@ function showResult(result) {
   }
   wrap.replaceChildren(table);
   const n = result.values.length;
-  $('result-meta').textContent = `${n} row${n === 1 ? '' : 's'}`;
+  $('result-meta').textContent = `${note ? `${note} · ` : ''}${n} row${n === 1 ? '' : 's'}`;
 }
 
 function formatValue(v) {

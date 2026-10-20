@@ -46,7 +46,7 @@ export class SqlRunner {
     return this.loaded;
   }
 
-  // queries: [{ sql, dataset }] -> [{ columns, values } | { error }]
+  // queries: [{ sql, dataset, foreignKeys?, setup?, after? }] -> [{ columns, values, after? } | { error }]
   async run(queries) {
     await this.loaded;
     return this.call({ type: 'run', queries }, this.timeoutMs);

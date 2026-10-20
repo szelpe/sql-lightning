@@ -112,7 +112,8 @@ code { background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 4px; }
   color: var(--text);
 }
 .sidebar .chapter-head .badge { font-weight: 400; }
-.sidebar .chapter.soon .chapter-head { color: var(--muted); font-weight: 500; }
+.sidebar .chapter.upcoming .chapter-head { color: var(--muted); font-weight: 500; }
+.sidebar .chapter.upcoming .chapter-lessons .badge { display: none; }
 .sidebar .chapter-lessons a, .sidebar .chapter-lessons .soon { padding-left: 16px; }
 
 .content { padding: 32px clamp(16px, 4vw, 48px) 64px; max-width: 1280px; }
@@ -237,6 +238,26 @@ code { background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 4px; }
 .table-wrap tbody tr:hover td { background: var(--row-hover); }
 .table-wrap td.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 0.85rem; }
 .table-wrap td.null { color: var(--muted); font-style: italic; font-size: 0.8rem; }
+
+/* Constraint test checklist */
+.tests { margin-top: 14px; }
+.tests h2 { margin-bottom: 6px; }
+.tests ul { list-style: none; margin: 0; padding: 0; border: 1px solid var(--grid); border-radius: 6px; }
+.tests li {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 10px;
+  font-size: 0.88rem;
+  border-bottom: 1px solid var(--grid);
+}
+.tests li:last-child { border-bottom: 0; }
+.tests .test-mark { font-weight: 700; text-align: center; color: var(--muted); }
+.tests .test-expect { font-size: 0.78rem; color: var(--muted); white-space: nowrap; }
+.tests li.pass .test-mark { color: var(--ok); }
+.tests li.fail { background: var(--err-bg); }
+.tests li.fail .test-mark { color: var(--err); }
 
 /* Tasks */
 .tasks-panel { position: sticky; top: 72px; }

@@ -1,33 +1,83 @@
-// Compares a learner's result with the reference solution's result.
-// results = [userMain, refMain, userShadow, refShadow]
-export function checkTask(task, userSql, [userMain, refMain, userShadow, refShadow]) {
+// Checks a learner's statements for one task. A task is checked in one of three ways:
+//   - query tasks: the learner's result must match the reference solution's result,
+//     on the visible data (user/ref) and on the shadow data (userShadow/refShadow);
+//   - `afterQuery` tasks: after running the learner's and the solution's statements,
+//     the afterQuery's results must match (for INSERT/UPDATE/DELETE);
+//   - `tests` tasks: each test statement runs after the learner's SQL and must succeed,
+//     or be rejected by the named constraint (for CREATE TABLE).
+// `user.after` holds the afterQuery result first (if any), then one result per test.
+export function checkTask(task, userSql, { user, ref, userShadow, refShadow }) {
   const opts = { ordered: false, decimals: 2, requires: [], forbids: [], ...task.check };
+  if (user.error) return { ok: false, message: user.error };
 
-  if (userMain.error) return { ok: false, message: userMain.error };
-  if (refMain.error) return { ok: false, message: `Lesson bug: reference solution failed (${refMain.error}).` };
+  const after = user.after || [];
+  const tests = (task.tests || []).map((test, i) => evaluateTest(test, after[i + (task.afterQuery ? 1 : 0)], opts));
+  const failed = tests.find((t) => !t.passed);
+  if (failed) return { ok: false, message: failed.message, tests };
 
-  const diff = compareResults(userMain, refMain, opts);
-  if (diff) return { ok: false, message: diff };
+  if (task.afterQuery) {
+    if (ref.error) return { ok: false, message: `Lesson bug: reference solution failed (${ref.error}).`, tests };
+    const diff = compareResults(after[0], ref.after[0], opts, 'the table has');
+    if (diff) return { ok: false, message: `After your statements, the table isn't as expected. ${diff}`, tests };
+  } else if (!tests.length) {
+    if (ref.error) return { ok: false, message: `Lesson bug: reference solution failed (${ref.error}).` };
+    const diff = compareResults(user, ref, opts);
+    if (diff) return { ok: false, message: diff };
+  }
 
   const concept = conceptProblem(userSql, opts);
-  if (concept) return { ok: false, nearly: true, message: concept };
+  if (concept) return { ok: false, nearly: true, message: concept, tests };
 
-  if (userShadow.error || compareResults(userShadow, refShadow, opts)) {
+  if (userShadow && (userShadow.error || compareResults(userShadow, refShadow, opts))) {
     return {
       ok: false,
       nearly: true,
       message: 'This matches the data shown, but would give a wrong answer on different data. Avoid hard-coding values.',
     };
   }
-  return { ok: true };
+  return { ok: true, tests };
 }
 
-export function compareResults(user, ref, opts) {
+// test: { label, sql, expect?: 'ok' | 'NOT NULL' | 'UNIQUE' | 'CHECK' | 'FOREIGN KEY', rows? }
+// `rows` (only with expect 'ok') is the exact result the test query must return.
+function evaluateTest(test, res, opts) {
+  const expect = test.expect || 'ok';
+  const result = (passed, message) => ({ label: test.label, expect, passed, message });
+  if (!res) return result(false, `"${test.label}" didn't run.`);
+
+  if (expect === 'ok') {
+    if (res.error) return result(false, `"${test.label}" should work, but failed: ${res.error}`);
+    if (test.rows) {
+      const got = res.values.map((row) => rowKey(row, opts)).join();
+      const want = test.rows.map((row) => rowKey(row, opts)).join();
+      if (got !== want) {
+        return result(false, `"${test.label}": expected ${formatRows(test.rows)}, got ${formatRows(res.values)}.`);
+      }
+    }
+    return result(true);
+  }
+
+  if (!res.error) return result(false, `"${test.label}" should be rejected, but the database accepted it.`);
+  if (!/constraint failed/i.test(res.error)) {
+    return result(false, `"${test.label}" failed, but not because of a constraint: ${res.error}`);
+  }
+  if (!res.error.toUpperCase().startsWith(`${expect} CONSTRAINT`)) {
+    return result(false, `"${test.label}" was rejected by the wrong rule (${res.error}). Expected a ${expect} constraint.`);
+  }
+  return result(true);
+}
+
+function formatRows(rows) {
+  if (!rows.length) return 'no rows';
+  return rows.map((row) => row.map((v) => (v === null ? 'NULL' : String(v))).join(', ')).join(' / ');
+}
+
+export function compareResults(user, ref, opts, actual = 'your query returns') {
   const n = ref.columns.length;
   const m = user.columns.length;
-  if (m !== n) return `Expected ${plural(n, 'column')}, but your query returns ${m}.`;
+  if (m !== n) return `Expected ${plural(n, 'column')}, but ${actual} ${m}.`;
   if (user.values.length !== ref.values.length) {
-    return `Expected ${plural(ref.values.length, 'row')}, but your query returns ${user.values.length}.`;
+    return `Expected ${plural(ref.values.length, 'row')}, but ${actual} ${user.values.length}.`;
   }
 
   const order = opts.columnOrder ? ref.columns.map((_c, i) => i) : matchColumns(user, ref, opts);
