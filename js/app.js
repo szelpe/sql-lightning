@@ -1,4 +1,4 @@
-import { lessons } from './lessons/index.js';
+import { chapters, lessons } from './lessons/index.js';
 import { SqlRunner } from './db.js';
 import { checkTask } from './checker.js';
 import * as progress from './progress.js';
@@ -60,10 +60,16 @@ route();
 // ---------- Routing and rendering ----------
 
 function route() {
+  const chapterId = location.hash.match(/^#\/chapter\/([\w-]+)/)?.[1];
+  const chapterStart = chapters.find((c) => c.id === chapterId)?.lessons.find(isPlayable);
+  if (chapterStart) {
+    location.replace(`#/lesson/${chapterStart.id}`);
+    return;
+  }
   const id = location.hash.match(/^#\/lesson\/([\w-]+)/)?.[1];
-  const target = lessons.find((l) => l.id === id && l.tasks);
+  const target = lessons.find((l) => l.id === id && isPlayable(l));
   if (!target) {
-    location.replace(`#/lesson/${lessons[0].id}`);
+    location.replace(`#/lesson/${lessons.find(isPlayable).id}`);
     return;
   }
   $('sidebar').classList.remove('open');
@@ -72,9 +78,10 @@ function route() {
 
 function showLesson(next) {
   lesson = next;
-  const index = lessons.indexOf(lesson);
+  const chapter = chapterOf(lesson);
   document.title = `${lesson.title} · SQL Lightning`;
-  $('lesson-kicker').textContent = `Lesson ${index + 1}`;
+  $('lesson-kicker').textContent =
+    `Chapter ${chapterNumber(chapter)} · Lesson ${chapter.lessons.indexOf(lesson) + 1}`;
   $('lesson-title').textContent = lesson.title;
   $('lesson-body').innerHTML = lesson.body; // authored lesson content, not user input
   $('exercise').hidden = false;
@@ -86,24 +93,43 @@ function showLesson(next) {
 }
 
 function renderNav() {
-  const nav = $('lesson-nav');
-  nav.replaceChildren(...lessons.map((l, i) => {
-    const li = document.createElement('li');
-    const label = `${i + 1}. ${l.title}`;
-    if (!l.tasks) {
-      const span = el('span', 'soon', label);
-      span.append(el('span', 'badge', 'soon'));
-      li.append(span);
-      return li;
+  $('lesson-nav').replaceChildren(...chapters.map((chapter) => {
+    const li = el('li', 'chapter');
+    const head = el('div', 'chapter-head');
+    head.append(el('span', 'chapter-title', `Chapter ${chapterNumber(chapter)} · ${chapter.title}`));
+    const playable = chapter.lessons.filter(isPlayable);
+    if (!playable.length) {
+      li.classList.add('soon');
+      head.append(el('span', 'badge', 'soon'));
+    } else {
+      const done = playable.filter(isComplete).length;
+      const complete = done === playable.length;
+      head.append(el('span', complete ? 'badge complete' : 'badge',
+        complete ? '✓' : `${done}/${playable.length} lessons`));
     }
-    const a = el('a', l === lesson ? 'current' : '', label);
-    a.href = `#/lesson/${l.id}`;
-    const solved = Object.keys(progress.solvedTasks(l.id)).length;
-    const complete = solved === l.tasks.length;
-    a.append(el('span', complete ? 'badge complete' : 'badge', complete ? '✓' : `${solved}/${l.tasks.length}`));
-    li.append(a);
+    const list = el('ol', 'chapter-lessons');
+    list.append(...chapter.lessons.map((l, i) => renderNavLesson(l, `${i + 1}. ${l.title}`)));
+    li.append(head, list);
     return li;
   }));
+}
+
+function renderNavLesson(l, label) {
+  const li = document.createElement('li');
+  if (!isPlayable(l)) {
+    const span = el('span', 'soon', label);
+    span.append(el('span', 'badge', 'soon'));
+    li.append(span);
+    return li;
+  }
+  const a = el('a', l === lesson ? 'current' : '', label);
+  a.href = `#/lesson/${l.id}`;
+  if (l === lesson) a.setAttribute('aria-current', 'page');
+  const solved = Object.keys(progress.solvedTasks(l.id)).length;
+  const complete = solved === l.tasks.length;
+  a.append(el('span', complete ? 'badge complete' : 'badge', complete ? '✓' : `${solved}/${l.tasks.length}`));
+  li.append(a);
+  return li;
 }
 
 function renderTasks() {
@@ -125,14 +151,28 @@ function renderTasks() {
   $('task-help').hidden = done;
   $('hint').hidden = true;
   $('lesson-done').hidden = !done;
-  if (done) {
-    const next = lessons.slice(lessons.indexOf(lesson) + 1).find((l) => l.tasks);
-    $('next-lesson').hidden = !next;
-    if (next) $('next-lesson').href = `#/lesson/${next.id}`;
-    const upcoming = lessons.some((l) => !l.tasks);
-    $('lesson-done').querySelector('p').innerHTML = next
-      ? '<strong>Lesson complete!</strong>'
-      : `<strong>Lesson complete!</strong> ${upcoming ? 'More lessons are coming soon.' : "That's the last lesson."}`;
+  if (done) renderLessonDone();
+}
+
+function renderLessonDone() {
+  const next = lessons.slice(lessons.indexOf(lesson) + 1).find(isPlayable);
+  $('next-lesson').hidden = !next;
+  if (next) $('next-lesson').href = `#/lesson/${next.id}`;
+
+  const chapter = chapterOf(lesson);
+  const rest = chapter.lessons.slice(chapter.lessons.indexOf(lesson) + 1);
+  const msg = $('lesson-done').querySelector('p');
+  if (rest.some(isPlayable)) {
+    msg.replaceChildren(el('strong', '', 'Lesson complete!'));
+    return;
+  }
+  msg.replaceChildren(el('strong', '', `Chapter ${chapterNumber(chapter)} complete!`));
+  const nextChapter = chapters[chapters.indexOf(chapter) + 1];
+  if (nextChapter) {
+    const soon = nextChapter.lessons.some(isPlayable) ? '' : ' (coming soon)';
+    msg.append(` Next up: Chapter ${chapterNumber(nextChapter)} · ${nextChapter.title}${soon}.`);
+  } else {
+    msg.append(rest.length ? ' More lessons are coming soon.' : " That's the last lesson.");
   }
 }
 
@@ -309,6 +349,22 @@ function setFeedback(text, kind) {
 }
 
 // ---------- Helpers ----------
+
+function isPlayable(l) {
+  return Boolean(l.tasks);
+}
+
+function isComplete(l) {
+  return Object.keys(progress.solvedTasks(l.id)).length === l.tasks.length;
+}
+
+function chapterOf(l) {
+  return chapters.find((c) => c.lessons.includes(l));
+}
+
+function chapterNumber(chapter) {
+  return chapters.indexOf(chapter) + 1;
+}
 
 function el(tag, className, text) {
   const node = document.createElement(tag);

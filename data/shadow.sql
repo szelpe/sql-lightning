@@ -5,6 +5,8 @@
 UPDATE employees SET salary = salary + 37 * id;
 UPDATE employees SET bonus = NULL WHERE id = 2;
 UPDATE sales SET amount = amount + 250 * id;
+-- Gives Eva Horvath a different management chain (Clara -> Anna instead of Bence -> Anna).
+UPDATE employees SET manager_id = 3 WHERE id = 5;
 
 INSERT INTO employees VALUES
  (17, 'Quinn Reed', 3, 'Analyst', 6300, 700, 2012, 11);

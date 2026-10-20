@@ -101,6 +101,19 @@ code { background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 4px; }
 .sidebar .soon { color: var(--muted); cursor: default; }
 .sidebar .badge { font-size: 0.8rem; color: var(--muted); white-space: nowrap; }
 .sidebar .badge.complete { color: var(--ok); }
+.sidebar .chapter + .chapter { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
+.sidebar .chapter-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 8px 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.sidebar .chapter-head .badge { font-weight: 400; }
+.sidebar .chapter.soon .chapter-head { color: var(--muted); font-weight: 500; }
+.sidebar .chapter-lessons a, .sidebar .chapter-lessons .soon { padding-left: 16px; }
 
 .content { padding: 32px clamp(16px, 4vw, 48px) 64px; max-width: 1280px; }
 
