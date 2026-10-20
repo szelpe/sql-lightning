@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SQL Lightning</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/sql/sql.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <button class="nav-toggle" id="nav-toggle" aria-label="Show lessons" aria-expanded="false">☰</button>
+    <a class="brand" href="#/">⚡ SQL Lightning</a>
+  </header>
+
+  <div class="layout">
+    <nav class="sidebar" id="sidebar" aria-label="Lessons">
+      <h2>Lessons</h2>
+      <ol id="lesson-nav"></ol>
+    </nav>
+
+    <main class="content" id="content">
+      <article class="lesson">
+        <p class="lesson-kicker" id="lesson-kicker"></p>
+        <h1 id="lesson-title">Loading…</h1>
+        <div class="lesson-body" id="lesson-body"></div>
+      </article>
+
+      <section class="exercise" id="exercise" hidden>
+        <div class="workbench">
+          <div class="editor-panel">
+            <div class="panel-head">
+              <h2>Your query</h2>
+              <div class="panel-actions">
+                <button class="link-btn" id="reset-query" type="button">Reset</button>
+                <button class="btn primary" id="run-query" type="button">Run <kbd>Ctrl ↵</kbd></button>
+              </div>
+            </div>
+            <div class="editor" id="editor"></div>
+            <div class="feedback" id="feedback" role="status" aria-live="polite"></div>
+          </div>
+
+          <div class="results-panel">
+            <div class="panel-head"><h2>Result</h2><span class="muted" id="result-meta"></span></div>
+            <div class="table-wrap" id="results"></div>
+          </div>
+        </div>
+
+        <aside class="tasks-panel">
+          <div class="panel-head">
+            <h2>Tasks</h2>
+            <button class="link-btn" id="reset-progress" type="button">Reset progress</button>
+          </div>
+          <ol class="tasks" id="tasks"></ol>
+          <div class="task-help" id="task-help">
+            <button class="link-btn" id="show-hint" type="button">Hint</button>
+            <span class="muted">·</span>
+            <button class="link-btn" id="show-solution" type="button">Show solution</button>
+          </div>
+          <p class="hint" id="hint" hidden></p>
+          <div class="done" id="lesson-done" hidden>
+            <p><strong>Lesson complete!</strong></p>
+            <a class="btn primary" id="next-lesson" href="#/">Next lesson ›</a>
+          </div>
+
+          <div class="schema">
+            <h2>Tables</h2>
+            <div id="schema"></div>
+          </div>
+        </aside>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
